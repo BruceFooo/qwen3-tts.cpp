@@ -5,6 +5,42 @@
 #include <string>
 #include <iostream> // Added for std::cin and std::getline
 
+namespace qwen3_tts {
+
+bool save_speaker_embedding(const std::string & path, const std::vector<float> & embedding) {
+    FILE * f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+    
+    uint32_t size = embedding.size();
+    fwrite(&size, sizeof(uint32_t), 1, f);
+    fwrite(embedding.data(), sizeof(float), size, f);
+    
+    fclose(f);
+    return true;
+}
+
+bool load_speaker_embedding(const std::string & path, std::vector<float> & embedding) {
+    FILE * f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+    
+    uint32_t size = 0;
+    if (fread(&size, sizeof(uint32_t), 1, f) != 1) {
+        fclose(f);
+        return false;
+    }
+    
+    embedding.resize(size);
+    if (fread(embedding.data(), sizeof(float), size, f) != size) {
+        fclose(f);
+        return false;
+    }
+    
+    fclose(f);
+    return true;
+}
+
+}
+
 void print_usage(const char * program) {
     fprintf(stderr, "Usage: %s [options] -m <model_dir>\n", program);
     fprintf(stderr, "\n");
@@ -180,12 +216,18 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "Error: %s\n", tts.get_error().c_str());
         return 1;
     }
- 
+    
     // Handle saving speaker embedding if requested
     if (!save_speaker_file.empty() && !reference_audio.empty()) {
         fprintf(stderr, "Extracting speaker embedding from %s...\n", reference_audio.c_str());
+        std::vector<float> ref_samples;
+        int ref_sample_rate;
+        if (!qwen3_tts::load_audio_file(reference_audio, ref_samples, ref_sample_rate)) {
+            fprintf(stderr, "Failed to load reference audio: %s\n", reference_audio.c_str());
+            return 1;
+        }
         std::vector<float> emb;
-        if (tts.extract_speaker_embedding(reference_audio, emb)) {
+        if (tts.extract_speaker_embedding(ref_samples.data(), (int32_t)ref_samples.size(), emb)) {
             if (qwen3_tts::save_speaker_embedding(save_speaker_file, emb)) {
                 fprintf(stderr, "Successfully saved speaker embedding to %s\n", save_speaker_file.c_str());
                 // If no text was provided, the user just wanted to extract the voice. Exit cleanly.
@@ -223,7 +265,7 @@ int main(int argc, char ** argv) {
         
         if (has_precomputed) {
             fprintf(stderr, "Synthesizing with precomputed voice: \"%s\"\n", current_text.c_str());
-            result = tts.synthesize_with_embedding(current_text, precomputed_emb, params);
+            result = tts.synthesize_with_embedding(current_text, precomputed_emb.data(), (int32_t)precomputed_emb.size(), params);
         } else if (!reference_audio.empty()) {
             fprintf(stderr, "Synthesizing with voice cloning: \"%s\"\n", current_text.c_str());
             result = tts.synthesize_with_voice(current_text, reference_audio, params);
