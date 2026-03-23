@@ -4,6 +4,24 @@
 #include <cstring>
 #include <string>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+std::string mbcs_to_utf8(const std::string &input) {
+    int wlen = MultiByteToWideChar(CP_ACP, 0, input.c_str(), -1, NULL, 0);
+    std::vector<wchar_t> wbuf(wlen);
+    MultiByteToWideChar(CP_ACP, 0, input.c_str(), -1, &wbuf[0], wlen);
+    int ulen = WideCharToMultiByte(CP_UTF8, 0, &wbuf[0], -1, NULL, 0, NULL, NULL);
+    std::string utf8Str(ulen, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wbuf[0], -1, &utf8Str[0], ulen, NULL, NULL);
+    if (!utf8Str.empty() && utf8Str.back() == '\0') {
+        utf8Str.pop_back();
+    }
+    return utf8Str;
+}
+#endif
+
 void print_usage(const char * program) {
     fprintf(stderr, "Usage: %s [options] -m <model_dir> -t <text>\n", program);
     fprintf(stderr, "\n");
@@ -164,7 +182,12 @@ int main(int argc, char ** argv) {
     } else {
         fprintf(stderr, "Synthesizing with voice cloning: \"%s\"\n", text.c_str());
         fprintf(stderr, "Reference audio: %s\n", reference_audio.c_str());
-        result = tts.synthesize_with_voice(text, reference_audio, params);
+#ifdef _WIN32
+        std::string utf8Text = mbcs_to_utf8(text);
+#else
+        std::string utf8Text = text;
+#endif
+        result = tts.synthesize_with_voice(utf8Text, reference_audio, params);
     }
     
     if (!result.success) {
