@@ -8,6 +8,8 @@
 #include <fstream>
 #include <cstdint>
 #include <cstdlib>
+#include <algorithm>
+#include <iomanip>
 
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -96,34 +98,9 @@ static void log_memory_usage(const char * label) {
             format_bytes(mem.phys_footprint_bytes).c_str());
 }
 
-static void resample_linear(const float * input, int input_len, int input_rate,
-                            std::vector<float> & output, int output_rate) {
-    double ratio = (double)input_rate / output_rate;
-    int output_len = (int)((double)input_len / ratio);
-    output.resize(output_len);
-    
-    for (int i = 0; i < output_len; ++i) {
-        double src_idx = i * ratio;
-        int idx0 = (int)src_idx;
-        int idx1 = idx0 + 1;
-        double frac = src_idx - idx0;
-        
-        if (idx1 >= input_len) {
-            output[i] = input[input_len - 1];
-        } else {
-            output[i] = (float)((1.0 - frac) * input[idx0] + frac * input[idx1]);
-        }
-    }
-}
-
 Qwen3TTS::Qwen3TTS() = default;
 
 Qwen3TTS::~Qwen3TTS() = default;
-
-void Qwen3TTS::set_seed(int seed)
-{
-    this->transformer_.set_seed((uint32_t)seed);
-}
 
 bool Qwen3TTS::load_models(const std::string & model_dir,
                            const std::string & tts_model,
@@ -521,6 +498,26 @@ void Qwen3TTS::set_progress_callback(tts_progress_callback_t callback) {
     progress_callback_ = callback;
 }
 
+void resample_linear(const float * input, int input_len, int input_rate,
+                     std::vector<float> & output, int output_rate) {
+    double ratio = (double)input_rate / output_rate;
+    int output_len = (int)((double)input_len / ratio);
+    output.resize(output_len);
+
+    for (int i = 0; i < output_len; ++i) {
+        double src_idx = i * ratio;
+        int idx0 = (int)src_idx;
+        int idx1 = idx0 + 1;
+        double frac = src_idx - idx0;
+
+        if (idx1 >= input_len) {
+            output[i] = input[input_len - 1];
+        } else {
+            output[i] = (float)((1.0 - frac) * input[idx0] + frac * input[idx1]);
+        }
+    }
+}
+
 // WAV file loading (16-bit PCM or 32-bit float)
 bool load_audio_file(const std::string & path, std::vector<float> & samples, 
                      int & sample_rate) {
@@ -714,6 +711,108 @@ bool save_audio_file(const std::string & path, const std::vector<float> & sample
     
     fclose(f);
     return true;
+}
+
+static std::string to_lower_ascii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return (char) std::tolower(c);
+    });
+    return s;
+}
+
+static bool has_json_extension(const std::string & path) {
+    const size_t pos = path.find_last_of('.');
+    if (pos == std::string::npos) {
+        return false;
+    }
+    const std::string ext = to_lower_ascii(path.substr(pos));
+    return ext == ".json";
+}
+
+static bool parse_embedding_text(const std::string & text, std::vector<float> & embedding) {
+    std::string cleaned = text;
+    for (char & c : cleaned) {
+        if (c == '[' || c == ']' || c == ',' || c == ';') {
+            c = ' ';
+        }
+    }
+
+    std::istringstream iss(cleaned);
+    float value = 0.0f;
+    embedding.clear();
+    while (iss >> value) {
+        embedding.push_back(value);
+    }
+    return !embedding.empty();
+}
+
+bool load_speaker_embedding_file(const std::string & path,
+                                 std::vector<float> & embedding) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        fprintf(stderr, "ERROR: Cannot open speaker embedding file: %s\n", path.c_str());
+        return false;
+    }
+
+    std::string data((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    if (data.empty()) {
+        fprintf(stderr, "ERROR: Speaker embedding file is empty: %s\n", path.c_str());
+        return false;
+    }
+
+    if (has_json_extension(path) || data.find('[') != std::string::npos) {
+        if (!parse_embedding_text(data, embedding)) {
+            fprintf(stderr, "ERROR: Failed to parse speaker embedding JSON/text: %s\n", path.c_str());
+            return false;
+        }
+        return true;
+    }
+
+    if (data.size() % sizeof(float) != 0) {
+        fprintf(stderr, "ERROR: Speaker embedding binary size is not a multiple of 4 bytes: %s\n", path.c_str());
+        return false;
+    }
+
+    embedding.resize(data.size() / sizeof(float));
+    memcpy(embedding.data(), data.data(), data.size());
+    return true;
+}
+
+bool save_speaker_embedding_file(const std::string & path,
+                                 const std::vector<float> & embedding) {
+    if (embedding.empty()) {
+        fprintf(stderr, "ERROR: Refusing to save empty speaker embedding\n");
+        return false;
+    }
+
+    if (has_json_extension(path)) {
+        std::ofstream out(path, std::ios::out | std::ios::trunc);
+        if (!out) {
+            fprintf(stderr, "ERROR: Cannot create speaker embedding JSON file: %s\n", path.c_str());
+            return false;
+        }
+        out << std::setprecision(std::numeric_limits<float>::max_digits10);
+        out << "[\n";
+        for (size_t i = 0; i < embedding.size(); ++i) {
+            out << "  " << embedding[i];
+            if (i + 1 != embedding.size()) {
+                out << ",";
+            }
+            out << "\n";
+        }
+        out << "]\n";
+        return true;
+    }
+
+    std::ofstream out(path, std::ios::binary | std::ios::out | std::ios::trunc);
+    if (!out) {
+        fprintf(stderr, "ERROR: Cannot create speaker embedding binary file: %s\n", path.c_str());
+        return false;
+    }
+    out.write(reinterpret_cast<const char *>(embedding.data()),
+              (std::streamsize) (embedding.size() * sizeof(float)));
+    return out.good();
 }
 
 } // namespace qwen3_tts

@@ -4,6 +4,7 @@
 #include "tts_transformer.h"
 #include "audio_tokenizer_encoder.h"
 #include "audio_tokenizer_decoder.h"
+#include "gguf_loader.h"
 
 #include <string>
 #include <vector>
@@ -84,7 +85,11 @@ public:
     Qwen3TTS();
     ~Qwen3TTS();
 
-    void set_seed(int seed);
+    // Force f32 accumulation in matmul (improves quality on some GPUs)
+    void set_force_f32_acc(bool v) { transformer_.set_force_f32_acc(v); }
+
+    // Set RNG seed for reproducible output (0 = random)
+    void set_seed(int seed) { transformer_.set_seed((uint32_t)seed); }
 
     // Load all models from directory
     // model_dir should contain: transformer.gguf, tokenizer.gguf, vocoder.gguf
@@ -161,6 +166,9 @@ private:
     tts_progress_callback_t progress_callback_;
 };
 
+void resample_linear(const float * input, int input_len, int input_rate,
+                     std::vector<float> & output, int output_rate);
+
 // Utility: Load audio file (WAV format)
 bool load_audio_file(const std::string & path, std::vector<float> & samples, 
                      int & sample_rate);
@@ -168,5 +176,13 @@ bool load_audio_file(const std::string & path, std::vector<float> & samples,
 // Utility: Save audio file (WAV format)
 bool save_audio_file(const std::string & path, const std::vector<float> & samples,
                      int sample_rate);
+
+// Utility: Load speaker embedding from JSON or float32 binary
+bool load_speaker_embedding_file(const std::string & path,
+                                 std::vector<float> & embedding);
+
+// Utility: Save speaker embedding as JSON (.json) or float32 binary
+bool save_speaker_embedding_file(const std::string & path,
+                                 const std::vector<float> & embedding);
 
 } // namespace qwen3_tts
