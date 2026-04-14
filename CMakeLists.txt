@@ -39,6 +39,12 @@ else()
     set(GGML_HAS_METAL OFF)
 endif()
 
+if(MSVC)
+    add_compile_definitions(_USE_MATH_DEFINES)
+endif()
+
+#link_directories(${GGML_BUILD_DIR}/src/Debug)
+
 # Text tokenizer library
 add_library(text_tokenizer STATIC
     src/text_tokenizer.cpp

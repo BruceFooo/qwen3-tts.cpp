@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <sstream>
 #include <cstdint>
 #include <cstdlib>
 #include <algorithm>
@@ -13,7 +14,9 @@
 
 #ifdef __APPLE__
 #include <mach/mach.h>
-#elif defined(_WIN32)
+#elif defined(_WIN32) || defined(_WIN64)
+#define NOMINMAX 
+#define WIN32_LEAN_AND_MEAN  
 #include <windows.h>
 #include <psapi.h>
 #else

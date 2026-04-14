@@ -110,6 +110,9 @@ cmake -S ggml -B ggml/build -DGGML_VULKAN=ON
 # Vulkan/MinGW-w64
 cmake -S ggml -B ggml/build -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=ON
 cmake --build ggml/build -j4
+# CUDA/Windows
+cmake -S ggml -B ggml/build   -DGGML_CUDA=ON   -DBUILD_SHARED_LIBS=ON
+cmake --build ggml/build  -j4
 
 # Build qwen3-tts.cpp
 # Enable PIC for Linux & MinGW-w64
